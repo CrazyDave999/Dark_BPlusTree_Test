@@ -1,0 +1,7 @@
+/.vscode
+*.bin
+*.dat
+/Local_test
+*.exe
+/build
+/testcases
