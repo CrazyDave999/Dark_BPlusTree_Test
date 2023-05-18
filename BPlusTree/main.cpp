@@ -5,7 +5,7 @@
 
 signed main() {
     using tree = dark::b_plus::tree 
-        <dark::string<68>,int,4095,50,101>
+        <dark::string<68>,int,4095,1000000,101>
     ;
     typename tree::return_list data;
     std::filesystem::create_directory("output");
