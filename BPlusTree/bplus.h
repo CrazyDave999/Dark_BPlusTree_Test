@@ -585,13 +585,13 @@ class tree {
     tree(std::string path1) :
         file(path1 + ".dat",path1 + ".bin") {
         if(file.empty()) {
-            file.skip_block();
+            file.init();
             root_state().modify();
             root().set_index(0,node_type::INNER);
             root().count = 0;
         } else {
             file.read_object(root(),0);
-            root_state().state = false;
+            root_state().inverse_modify();
         }
     }
 
@@ -599,10 +599,8 @@ class tree {
     /* Update root info if modified. */
     ~tree() { if(root_state().is_modified()) file.write_object(root(),0); }
 
-
     /* Return whether the tree is empty. */
     bool empty() const noexcept { return !__root_pair.second.count; }
-
 
     /* Insert a key-value pair into the node. */
     void insert(const key_t &key,const T &val) {
@@ -658,7 +656,10 @@ class tree {
      * 
      */
     void clear() {
-        /// TODO:
+        if(empty()) return; /* Doing nothing. */
+        root().count = 0;
+        root_state().modify();
+        file.clear();
     }
 
 };
@@ -675,7 +676,7 @@ class tree {
  * @tparam CACHE_SIZE Count of node in cache pool (NO LESS THAN 3 * tree_height).
  * @tparam page_num   Pages that one block takes.
  */
-template <class key_t,class T,int TABLE_SIZE,int CACHE_SIZE,int page_num>
+template <class key_t,class T,int TABLE_SIZE = 1000,int CACHE_SIZE = 64,int page_num = 2>
 using bpt = b_plus::tree <
     key_t,
       T,

@@ -91,7 +91,6 @@ class file_manager {
         { return __p->first.index; }
     };
 
-
     /* Can't start from nothing. */
     file_manager() = delete;
 
@@ -130,23 +129,22 @@ class file_manager {
 
     /* Recycle an old node. */
     void recycle(int index) {
-        /* Recycle first to rubbish bin. */
-        bin.recycle(index);
-        /* Erase element from map. */
-        map.erase({index,0});
+        bin.recycle(index);   /* Recycle first to rubbish bin. */
+        map.erase({index,0}); /* Erase element from map. */
     }
 
     /* Allocate a new node for further modification. */
     visitor allocate() {
         int index = bin.allocate(); /* Allocate a new node. */
         auto iter = map.find_pre({index,1}); /* Iterator before {index}. */
+        /* In theory , iter.next_data() should be nullptr. */
 
         /* Of course, newly allocated node will be modified. */
         return insert_map(iter,{index,1});
     }
 
-    /* Skip the last block. Users should manager the block themselves. */
-    void skip_block() { bin.skip_block(); }
+    /* Skip the first block. */
+    void init() { bin.init(); }
 
     /* Read object from disk at given index. */
     void read_object(T &obj,int index) {
@@ -163,6 +161,12 @@ class file_manager {
     size_t size() const noexcept { return bin.size(); }
     /* Whether node count is zero. */
     bool empty() const noexcept { return !bin.size(); }
+
+    /* Clear all the elements stored within. */
+    void clear() {
+        bin.reset(); /* Reset the bin to full. */
+        map.clear(); /* Clear all nodes from cache. */
+    }
 };
 
 }

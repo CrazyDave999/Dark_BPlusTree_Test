@@ -61,9 +61,15 @@ class rubbish_bin {
     /* Return count of all nodes. */
     size_t size() const noexcept { return total; }
 
-    /* Skip the last block. Users should manager the block themselves. */
-    void skip_block() { ++total; }
+    /* Skip the first block. Users should manager the block themselves. */
+    void init() { total = 1; }
 
+    /* Reset all the data , which means all nodes are availble now. */
+    void reset() {
+        bin_array.resize(total - 1);
+        for(size_t i = 0 ; i != total - 1 ; ++i)
+            bin_array[i] = i + 1; /* Note that block 0 is not availble. */
+    }
 };
 
 

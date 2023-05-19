@@ -57,7 +57,6 @@ class LRU_map {
 
     /* Allocate one node with given key and value. */
     baseptr allocate(const key_t &__k,const T &__v,bool useless) {
-        ++impl.count;
         if(cache.real) { /* Allocate from cache if available. */
             baseptr temp = cache.real; 
             cache.real   = temp->real;
@@ -71,7 +70,6 @@ class LRU_map {
 
     /* Deallocate one node after given pointer. */
     void deallocate(baseptr __p) {
-        --impl.count;
         __p->real   = cache.real;
         cache.real  = __p;
     }
@@ -112,6 +110,7 @@ class LRU_map {
         baseptr __p = find_index(__k);
 
         /* Allocate. */
+        ++impl.count;
         baseptr __n = allocate(__k,__t,useless);
 
         /* Relinking. */
@@ -133,6 +132,7 @@ class LRU_map {
         list::delink(static_cast <pointer> (__n));
 
         /* Deallocate. */
+        --impl.count;
         deallocate(__n);
     }
 
@@ -148,6 +148,20 @@ class LRU_map {
 
     /* Return count of elements in the map. */
     size_t size() const noexcept { return impl.count; }
+
+    /* Clear all the elements and move them to the cache inside. */
+    void clear() noexcept {
+        listptr __p = header.next;
+        while(__p != &header) {
+            listptr __n = __p->next; /* Next node. */
+            /* First return the node to cache. */
+            deallocate(static_cast <pointer> (__p));
+            /* Next clean the table index to nullptr. */
+            find_index(static_cast <pointer> (__p)->data.first)->real = nullptr;
+            __p = __n;
+        } /* Finally , re-linking header. */
+        header.next = header.prev = &header;
+    }
 
  public:
 

@@ -21,13 +21,14 @@ struct error {
 /* Simple file_state wrapper. Use highest bit to store modification state. */
 struct file_state {
     int  index; /* Index of the real data. */
-    bool state; /* Use highest bit to store modification state. */
+    bool state; /* Use one bit to store modification state. */
 
     /* Return whether the file is modified. */
     bool is_modified() const noexcept { return state; }
     /* Modify the file_state. */
     void modify() noexcept { state = true; }
-    
+    /* De-modify the file_state. */
+    void inverse_modify() noexcept { state = false; }
 };
 
 
