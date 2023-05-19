@@ -1,12 +1,11 @@
-#include "Dark/inout"
 #include "bplus.h"
+#include "Dark/inout"
+#include "string.h"
 #include <filesystem>
 
 
 signed main() {
-    using tree = dark::b_plus::tree 
-        <dark::string<68>,int,4095,1000000,101>
-    ;
+    using tree = dark::bpt <dark::string <68>,int,1023,100000,1>;
     typename tree::return_list data;
     std::filesystem::create_directory("output");
     tree t("output/a");

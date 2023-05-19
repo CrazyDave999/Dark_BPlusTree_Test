@@ -2,63 +2,72 @@
 #define _DARK_BPLUS_H_
 
 #include "file_manager.h"
-#include "string.h"
-
 
 namespace dark {
 
 namespace b_plus {
 
-// using key_t = string <68>;
-// using   T   = int;
-// using key_comp = Compare <key_t>;
-// using val_comp = Compare   <T>;
-// constexpr int TABLE_SIZE = 2000;
-// constexpr int CACHE_SIZE = 200; // NO LESS THAN tree_height * 2 + 2
-// constexpr int BLOCK_SIZE = 101;
-// constexpr int AMORT_SIZE = BLOCK_SIZE * 2 / 3;
-// constexpr int MERGE_SIZE = BLOCK_SIZE / 3;
-// constexpr int   MAX_SIZE = 30000000;
+/* Trivial key-value pair class. */
+template <class key_t,class T>
+struct value_pair {
+    key_t key; /*  Key.  */
+    T     val; /* Value. */
+    inline void copy(const key_t &__k,const T &__v) 
+    { key = __k; val = __v; }
+};
 
+/* Tuple of value and index and count. */
+template <class key_t,class T>
+struct tuple {
+    using value_t = value_pair <key_t,T>;
+    value_t v; /* Samllest pair of target node. */
+    header head;  /* A small header. */
+    /* Copying header info and value. */
+    inline void copy(const value_t &__v,header __h)
+    { head = __h; v = __v;}
+
+    /* Copying header info and value. */
+    inline void copy(const key_t &key,const T &val,header __h)
+    { head = __h; v.copy(key,val);}
+
+    /* Only copying key and value. */
+    inline void copy(const key_t &key,const T &val)
+    { v.copy(key,val); }
+};
+
+/**
+ * @brief A simple B+ tree implment.
+ * 
+ * @tparam key_t      Key_type.
+ * @tparam  T         Value_type.
+ * @tparam TABLE_SIZE Length of hast_table.
+ * @tparam CACHE_SIZE Count of node in cache pool (NO LESS THAN 3 * tree_height).
+ * @tparam BLOCK_SIZE Count of node in single block.
+ * @tparam key_comp   Compare function for key.
+ * @tparam val_comp   Compare function for value.
+ * @tparam AMORT_SIZE Threshold for amortization.(CAUTION! CAREFUL MODIFICATION!)
+ * @tparam MERGE_SIZE Threshold for merging.     (CAUTION! CAREFUL MODIFICATION!)
+ */
 template <
     class key_t,
     class   T  ,
-    size_t TABLE_SIZE = 2047,
-    size_t CACHE_SIZE = 8000,
-    int    BLOCK_SIZE = 101,
+    int TABLE_SIZE,
+    int CACHE_SIZE,
+    int BLOCK_SIZE = 101,
     class key_comp = Compare <key_t>,
     class val_comp = Compare   <T>,
     int AMORT_SIZE = BLOCK_SIZE * 2 / 3,
-    int MERGE_SIZE = BLOCK_SIZE / 3,
-    int   MAX_SIZE = 3000000
+    int MERGE_SIZE = BLOCK_SIZE / 3
 >
 class tree {
   private: /* Struct and using part. */
 
-    /* Trivial key-value pair class. */
-    struct value_t {
-        key_t key; /*  Key.  */
-        T     val; /* Value. */
-        inline void copy(const key_t &__k,const T &__v) 
-        { key = __k; val = __v; }
-    };
+    using tuple_t = tuple <key_t,T>;
 
-    /* Tuple of value and index and count. */
-    struct tuple_t {
-        value_t v; /* Samllest pair of target node. */
-        header head;  /* A small header. */
-        /* Copying header info and value. */
-        inline void copy(const value_t &__v,header __h)
-        { head = __h; v = __v;}
-
-        /* Copying header info and value. */
-        inline void copy(const key_t &key,const T &val,header __h)
-        { head = __h; v.copy(key,val);}
-
-        /* Only copying key and value. */
-        inline void copy(const key_t &key,const T &val)
-        { v.copy(key,val); }
-    };
+    /* Maximum node number. */
+    static constexpr int MAXN_SIZE = 1919810;
+    /* Effective size of a block. */
+    static constexpr int REAL_SIZE = sizeof(header) + BLOCK_SIZE * sizeof(tuple_t);
 
     /* Index node trivial class */
     struct node : header {
@@ -77,13 +86,13 @@ class tree {
 
     struct node_reader {
         inline void operator ()(std::fstream &__f,node &obj) {
-            __f.read((char *)(&obj),sizeof(header) + BLOCK_SIZE * sizeof(tuple_t));
+            __f.read((char *)(&obj),REAL_SIZE);
         }
     };
 
     struct node_writer {
         inline void operator ()(std::fstream &__f,const node &obj) {
-            __f.write((const char *)&obj,sizeof(header) + BLOCK_SIZE * sizeof(tuple_t));
+            __f.write((const char *)&obj,REAL_SIZE);
         }
     };
 
@@ -93,7 +102,8 @@ class tree {
                 TABLE_SIZE,
                 CACHE_SIZE,
                 node_reader,
-                node_writer
+                node_writer,
+                ((REAL_SIZE - 1) / 4096 + 1) * 4096
             >;
 
     using visitor = typename node_file_t::visitor;
@@ -176,7 +186,7 @@ class tree {
 
         /* Modify new node information. */
         pointer.modify();
-        pointer->set_next(MAX_SIZE,node_type::OUTER);
+        pointer->set_next(MAXN_SIZE,node_type::OUTER);
         pointer->count = 1;
         pointer->data[0].copy(key,val);
     }
@@ -188,7 +198,7 @@ class tree {
 
         /* Update next() of prev and next.  */
         prev->state = next.index();
-        next->state = MAX_SIZE;
+        next->state = MAXN_SIZE;
 
         /* Update prev and next count and move data. */
         prev->count = root().count >> 1;
@@ -564,82 +574,12 @@ class tree {
     }
 
 
-    /* DEBUG USE ONLY! */
-    const value_t &print_outer(header head) {
-        visitor pointer = get_pointer(head);
-        // if(head.count != pointer->count) throw error("Outer Mis-match");
-
-        std::cout << "Outer block "  << head.real_index() << " :\n";
-        for(int i = 0 ; i != head.count ; ++i)
-            std::cout << "Leaf " << i << ": || key: "
-                      << pointer->data[i].v.key.str
-                      << " || value: "
-                      << pointer->data[i].v.val
-                      << " ||\n";
-        std::cout << "Next index x: " << pointer->next();
-        std::cout << "\n--------------------------------\n";
-
-        return pointer->data[0].v;
-    }
-
-    const value_t check_outer(header head) {
-        visitor pointer = get_pointer(head);
-        if(head.count != pointer->count) throw error("Outer Mis-match");
-        return pointer->data[0].v;
-    }
-
-    const value_t check(header head) {
-        if(!head.is_inner()) return check_outer(head);
-        node data = *get_pointer(head);
-        if(head.count != data.count)
-            throw error("Inner Mis-Match!!!");
-        for(int i = 0 ; i != head.count ; ++i) {
-            auto &&temp = check(data.head(i));
-            if(k_comp(temp.key,data.data[i].v.key) ||
-               v_comp(temp.val,data.data[i].v.val)) {
-                throw error("Pair dismatch");
-            }
-        }
-        return data.data[0].v;
-    }
-
-
-    /* DEBUG USE ONLY! */
-    const value_t &print(header head) {
-        if(!head.is_inner()) return print_outer(head);
-        visitor pointer = get_pointer(head);
-        if(head.count != pointer->count)
-            throw error("Inner Mis-Match!!!");
-
-        std::cout << "Inner block "  << head.real_index() << " :\n";
-        for(int i = 0 ; i != head.count ; ++i)
-            std::cout << "Son " << i << ": || index: "
-                      << pointer->head(i).real_index()
-                      << " || key: "
-                      << pointer->data[i].v.key.str
-                      << " || value: "
-                      << pointer->data[i].v.val
-                      << " ||\n";
-        std::cout << "Next index x: " << pointer->next();
-        std::cout << "\n--------------------------------\n";
-
-        for(int i = 0 ; i != head.count ; ++i) {
-            auto &&temp = print(pointer->head(i));
-            if(k_comp(temp.key,pointer->data[i].v.key) ||
-               v_comp(temp.val,pointer->data[i].v.val)) {
-                throw error("Pair dismatch");
-            }
-        } return pointer->data[0].v;
-    }
-
   public: /* Public functions. */
-
 
     using return_list = dark::trivial_array <T>;
 
-
+    /* No default constructor. */
     tree() = delete;
-
 
     /* Initialize the tree. */
     tree(std::string path1) :
@@ -703,7 +643,7 @@ class tree {
             v.push_back(pointer->data[x++].v.val);
         }
         /* Find in the second block. */
-        while(pointer->next() != MAX_SIZE) {
+        while(pointer->next() != MAXN_SIZE) {
             pointer = get_pointer(*pointer); x = 0;
             while(x != pointer->count){
                 if(k_comp(key,pointer->data[x].v.key)) return;
@@ -711,6 +651,7 @@ class tree {
             }
         }
     }
+
 
     /**
      * @brief Clear all the data in the map.
@@ -720,14 +661,31 @@ class tree {
         /// TODO:
     }
 
-    /* DEBUG USE ONLY! */
-    void check_function() { if(!empty()) return (void)check(root());  }
-
-    void print_function() { if(!empty()) return (void)print(root()); }
 };
 
 
 }
+
+/**
+ * @brief B_plus tree wrapper.
+ * 
+ * @tparam key_t      Key_type.
+ * @tparam   T        Value_type.
+ * @tparam TABLE_SIZE Length of hast_table.
+ * @tparam CACHE_SIZE Count of node in cache pool (NO LESS THAN 3 * tree_height).
+ * @tparam page_num   Pages that one block takes.
+ */
+template <class key_t,class T,int TABLE_SIZE,int CACHE_SIZE,int page_num>
+using bpt = b_plus::tree <
+    key_t,
+      T,
+    TABLE_SIZE,
+    CACHE_SIZE,
+    (page_num * 4096 - sizeof(header)) / sizeof(b_plus::tuple <key_t,T>)
+>;
+
+
+
 
 }
 
