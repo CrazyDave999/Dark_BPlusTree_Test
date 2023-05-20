@@ -5,7 +5,7 @@
 #include "allocator.h"
 
 #include <iostream>
-#include <string>
+#include <cstring>
 
 namespace dark {
 
@@ -70,8 +70,8 @@ class LRU_map {
 
     /* Deallocate one node after given pointer. */
     void deallocate(baseptr __p) {
-        __p->real   = cache.real;
-        cache.real  = __p;
+        __p->real  = cache.real;
+        cache.real = __p;
     }
 
     /* Find the previous baseptr in the map.  */
@@ -121,10 +121,10 @@ class LRU_map {
         return {__p}; /* Return iterator to previous hash node. */
     }
 
-    /* Force to erase a key from hash_map. */
+    /* Tries to erase a key from hash_map. */
     void erase(const key_t &__k) {
         baseptr __p = find(__k);
-        if(!__p->real) throw 114514; /* DEBUG: This should never happen. */
+        if(!__p->real) return; /* Case: Not found. */
 
         /* Relinking. */
         baseptr __n = __p->real;
@@ -149,17 +149,14 @@ class LRU_map {
     /* Return count of elements in the map. */
     size_t size() const noexcept { return impl.count; }
 
-    /* Clear all the elements and move them to the cache inside. */
-    void clear() noexcept {
+    void clear() {
         listptr __p = header.next;
         while(__p != &header) {
-            listptr __n = __p->next; /* Next node. */
-            /* First return the node to cache. */
+            find_index(static_cast <pointer> (__p)->data.first)
+                ->real = nullptr; /* Clear hash table. */
             deallocate(static_cast <pointer> (__p));
-            /* Next clean the table index to nullptr. */
-            find_index(static_cast <pointer> (__p)->data.first)->real = nullptr;
-            __p = __n;
-        } /* Finally , re-linking header. */
+            __p = __p->next;
+        } /* Now the list is cleared empty.  */
         header.next = header.prev = &header;
     }
 

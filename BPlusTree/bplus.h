@@ -53,7 +53,7 @@ template <
     class   T  ,
     int TABLE_SIZE,
     int CACHE_SIZE,
-    int BLOCK_SIZE = 101,
+    int BLOCK_SIZE,
     class key_comp = Compare <key_t>,
     class val_comp = Compare   <T>,
     int AMORT_SIZE = BLOCK_SIZE * 2 / 3,
@@ -68,6 +68,7 @@ class tree {
     static constexpr int MAXN_SIZE = 1919810;
     /* Effective size of a block. */
     static constexpr int REAL_SIZE = sizeof(header) + BLOCK_SIZE * sizeof(tuple_t);
+
 
     /* Index node trivial class */
     struct node : header {
@@ -84,25 +85,13 @@ class tree {
         { return set_index(index,node_type(is_inner())); }
     };
 
-    struct node_reader {
-        inline void operator ()(std::fstream &__f,node &obj) {
-            __f.read((char *)(&obj),REAL_SIZE);
-        }
-    };
-
-    struct node_writer {
-        inline void operator ()(std::fstream &__f,const node &obj) {
-            __f.write((const char *)&obj,REAL_SIZE);
-        }
-    };
+    static_assert(REAL_SIZE + sizeof(tuple_t) == sizeof(node),"Fault");
 
     using node_file_t =
             file_manager <
                 node,
                 TABLE_SIZE,
                 CACHE_SIZE,
-                node_reader,
-                node_writer,
                 ((REAL_SIZE - 1) / 4096 + 1) * 4096
             >;
 
@@ -591,7 +580,7 @@ class tree {
             root().count = 0;
         } else {
             file.read_object(root(),0);
-            root_state().inverse_modify();
+            root_state().state = false;
         }
     }
 
@@ -599,8 +588,10 @@ class tree {
     /* Update root info if modified. */
     ~tree() { if(root_state().is_modified()) file.write_object(root(),0); }
 
+
     /* Return whether the tree is empty. */
     bool empty() const noexcept { return !__root_pair.second.count; }
+
 
     /* Insert a key-value pair into the node. */
     void insert(const key_t &key,const T &val) {
@@ -656,9 +647,9 @@ class tree {
      * 
      */
     void clear() {
-        if(empty()) return; /* Doing nothing. */
-        root().count = 0;
+        if(empty()) return;
         root_state().modify();
+        root().count = 0; /* No node. */
         file.clear();
     }
 
@@ -676,7 +667,7 @@ class tree {
  * @tparam CACHE_SIZE Count of node in cache pool (NO LESS THAN 3 * tree_height).
  * @tparam page_num   Pages that one block takes.
  */
-template <class key_t,class T,int TABLE_SIZE = 1000,int CACHE_SIZE = 64,int page_num = 2>
+template <class key_t,class T,int TABLE_SIZE,int CACHE_SIZE,int page_num>
 using bpt = b_plus::tree <
     key_t,
       T,
