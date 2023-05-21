@@ -6,7 +6,7 @@
 size_t hash_str(const char *str) {
     static size_t fix_random = rand() * rand();
     size_t __h = fix_random;
-    while(*str) { __h = __h * 5 + *(str++); }
+    while(*str) { __h = __h * 137 + *(str++); }
     return __h;
 }
 
