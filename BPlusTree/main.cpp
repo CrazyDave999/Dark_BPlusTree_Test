@@ -11,7 +11,7 @@ size_t hash_str(const char *str) {
 }
 
 signed main() {
-    using tree = dark::bpt <size_t,int,100,64,1>;
+    using tree = dark::bpt <size_t,int,100,10000,1>;
     typename tree::return_list data;
     std::filesystem::create_directory("output");
     tree t("output/a");
