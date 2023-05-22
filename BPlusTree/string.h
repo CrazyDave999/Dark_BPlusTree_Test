@@ -54,6 +54,29 @@ struct Compare <string <__n>> {
     const noexcept {  return strcmp(lhs.base(),rhs.base()); }
 };
 
+template <size_t __n>
+void write(const string <__n> &str) { write(str.base()); }
+
+size_t string_hash(const char *__s) noexcept {
+    static size_t fix_random = rand();
+    size_t __h = fix_random;
+    while(*__s) { __h = __h * 137 + *(__s++); }
+    return __h;
+}
+
+}
+
+namespace std {
+
+/* Custom String Hash. */
+template <size_t __n>
+struct hash <::dark::string <__n>> {
+    size_t operator()(const ::dark::string <__n> &str)
+    const noexcept { return ::dark::string_hash(str.base()); }
+};
+
+
+
 }
 
 #endif
