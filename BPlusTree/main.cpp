@@ -28,16 +28,22 @@ signed main() {
             t.erase(hash_str(str.base()),dark::read <int> ());
         } else {
             dark::read(str.str);
-            // t.find(hash_str(str.base()),data);
-            size_t __h = hash_str(str.base());
-            iter = t.find(__h);
-            if(!iter.valid() || iter->key != __h) puts("null");
+            data.clear();
+            t.find(hash_str(str.base()),data);
+            if(data.empty()) puts("null");
             else {
-                do {
-                    dark::print(iter->val,' '); ++iter;
-                } while(iter.valid() && iter->key == __h);
+                for(auto iter : data) dark::print(iter,' ');
                 putchar('\n');
             }
+            // size_t __h = hash_str(str.base());
+            // iter = t.find(__h);
+            // if(!iter.valid() || iter->key != __h) puts("null");
+            // else {
+            //     do {
+            //         dark::print(iter->val,' '); ++iter;
+            //     } while(iter.valid() && iter->key == __h);
+            //     putchar('\n');
+            // }
         }
     }
     return 0;
