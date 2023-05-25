@@ -3,6 +3,7 @@
 
 #include "hash.h"
 #include "allocator.h"
+#include "Dark/trivial_array"
 
 #include <iostream>
 #include <cstring>
@@ -184,8 +185,6 @@ class linked_hash_map {
         void *base() const noexcept { return __p; }
     };
 
-    /* DEBUG USE iterator part. */
-
     iterator begin() { return { static_cast <pointer> (header.next) }; }
     iterator end()   { return { static_cast <pointer> (&header) }; }
 
@@ -193,8 +192,9 @@ class linked_hash_map {
     noexcept { return lhs.base() != rhs.base(); }
 };
 
+
 /**
- * @brief Set for homework only. Do not use it!
+ * @brief Map for homework only. Do not use it!
  * 
  */
 template <
@@ -203,18 +203,24 @@ template <
     class Hash    = std::hash <key_t>,
     class Compare = std::equal_to <key_t>
 > 
-class hash_set {
+class linked_hash_set {
+  public:
+    struct iterator;
+
   private:
 
     using node_base = hash::node_base;
+    using list_node = list::node_base;
     using baseptr   = hash::baseptr;
-    using node      = hash::node <key_t>;
-    using pointer   = hash::node <key_t> *;
+    using listptr   = list::baseptr;
+    using node      = hash::linked_node <key_t>;
+    using pointer   = hash::linked_node <key_t> *;
     using Implement = implement <node,std::allocator <node>,Compare,Hash>;
 
   private:
 
     Implement impl;     /* Implement of the map. */ 
+    list_node header;   /* Header of list. */
     node_base cache;    /* Custom memory pool. */
     node_base table[kTABLESIZE]; /* Hash table. */
 
@@ -224,12 +230,16 @@ class hash_set {
     baseptr find_index(const key_t &__k) noexcept
     { return &table[Hash(impl)(__k) % kTABLESIZE]; }
 
+    /* Return the first pointer by given hash_code. */
+    baseptr find_index(size_t __h) noexcept
+    { return &table[__h % kTABLESIZE]; }
+
     /* Allocate one node with given key and value. */
     baseptr allocate(const key_t &__k) {
         if(cache.real) { /* Allocate from cache if available. */
             baseptr temp = cache.real; 
             cache.real   = temp->real;
-            static_cast <pointer> (temp)->data = __k;
+            memcpy(&static_cast <pointer> (temp)->data,&__k,sizeof(key_t));
             return temp;
         } else return impl.alloc(hash::forward_tag(),__k);
     }
@@ -240,7 +250,7 @@ class hash_set {
         cache.real = __p;
     }
 
-    /* Find the previous baseptr in the map.  */
+    /* Find the previous baseptr in the set.  */
     baseptr find_key(const key_t &__k) {
         baseptr __p = find_index(__k);
         while(__p->real) {
@@ -252,27 +262,50 @@ class hash_set {
         } return __p;
     }
 
-  public:
-
-    hash_set() noexcept = default;
-
-    ~hash_set() {
-        for(size_t i = 0 ; i != kTABLESIZE ; ++i) {
-            baseptr __p = table[i].real;
-            while(__p) {
-                baseptr __n = __p->real;
-                impl.dealloc(static_cast <pointer> (__p));
-                __p = __n;
-            }
-        }
-        while(cache.real) {
-            baseptr __p = cache.real;
-            cache.real  = __p->real;
-            impl.dealloc(static_cast <pointer> (__p));
-        }
+    /* Find the previous baseptr in the set.  */
+    baseptr find_hash(size_t __h) {
+        baseptr __p = find_index(__h);
+        while(__p->real) {
+            if( /* Given hash equal to the hash of current node. */
+                __h == Hash(impl)
+                        (static_cast <pointer> (__p->real) -> data)
+            ) break;
+            __p = __p->real;
+        } return __p;
     }
 
-    /* Forces to insert a key-value pair. */
+    bool erase_next(baseptr __p) {
+        if(!__p->real) return false; /* Case: Not found. */
+
+        /* Relinking. */
+        baseptr __n = __p->real;
+        __p->real   = __n->real;
+        list::delink(static_cast <pointer> (__n));
+
+        /* Deallocate. */
+        --impl.count;
+        deallocate(__n);
+        return true;
+    }
+
+  public:
+
+    linked_hash_set() noexcept : header({&header,&header}) {}
+
+    ~linked_hash_set() {
+        listptr __p = header.next;
+        while(__p != &header) {
+            listptr __n = __p->next; /* Next node. */
+            impl.dealloc(static_cast <pointer> (__p));
+            __p = __n;
+        } shrink();
+    }
+
+    /**
+     * @brief Force to insert a key into the set.
+     * 
+     * @param __k Key to insert.
+     */
     void insert(const key_t &__k) {
         baseptr __p = find_index(__k);
 
@@ -283,43 +316,106 @@ class hash_set {
         /* Relinking. */
         __n->real   = __p->real;
         __p->real   = __n;
+        list::link_before(&header,static_cast <pointer> (__p->real));
+
+        // return {__p}; /* Return iterator to previous hash node. */
     }
 
-    /* Tries to erase a key from hash_map. */
-    void erase(const key_t &__k) {
-        baseptr __p = find_key(__k);
-        if(!__p->real) return; /* Case: Not found. */
+    /**
+     * @brief Tries to erase a key from the set.
+     * 
+     * @param __k Key to erase.
+     */
+    bool erase(const key_t &__k) { return erase_next(find_key(__k)); }
 
-        /* Relinking. */
-        baseptr __n = __p->real;
-        __p->real   = __n->real;
+    /**
+     * @brief Tries to erase a key from the set by its hash code.
+     * 
+     * @param __h Hash code.
+     */
+    bool erase(size_t __h)      { return erase_next(find_hash(__h)); }
 
-        /* Deallocate. */
-        --impl.count;
-        deallocate(__n);
-    }
+    /**
+     * @brief Tries to erase a key from the set by its hash code.
+     * 
+     * @param __h Hash code.
+     */
+    bool erase(iterator iter) { return erase_next(iter.__p->real); }
 
-    /* Judge whether an element exists in the map. */
+    /* Judge whether the key existed. */
     bool exist(const key_t &__k) { return find_key(__k)->real; }
 
-    /* Return count of elements in the map. */
+    /* Judge whether the hash_code existed. */
+    bool exist(size_t __h)      { return find_hash(__h)->real; }
+
+    /* Find the pointer to key with given key. */
+    key_t *find(const key_t &__k) { return find_pre(__k).next_data(); }
+
+    /* Find the pointer to key with given hash_code. */
+    key_t *find(size_t __h)       { return find_pre(__h).next_data(); }
+
+    /* Find the previous node in hash_set.  */
+    iterator find_pre(const key_t &__k) { return {find_key(__k)}; }
+
+    /* Find the previous node in hash_set.  */
+    iterator find_pre(size_t __h)      { return {find_hash(__h)}; }
+
+    /* Return count of elements in the set. */
     size_t size() const noexcept { return impl.count; }
+
+    /* Return whether the set is empty. */
+    bool empty() const noexcept { return !impl.count; }
 
     /* Clear all the data within. */
     void clear() {
-        for(size_t i = 0 ; i != kTABLESIZE ; ++i) {
-            baseptr __p = table[i].real;
-            table[i].real = nullptr;
-            while(__p) { /* Clear the list. */
-                baseptr __n = __p->real;
-                deallocate(__p);
-                __p = __n;
-            }
-        }
+        listptr __p = header.next;
+        while(__p != &header) {
+            find_index(static_cast <pointer> (__p)->data)
+                ->real = nullptr; /* Clear hash table. */
+            deallocate(static_cast <pointer> (__p));
+            __p = __p->next;
+        } header.next = header.prev = &header;
+    }
+    
+    /* Clear all the cache info. */
+    void shrink() {
+        while(cache.real) {
+            baseptr __p = cache.real;
+            cache.real  = __p->real;
+            impl.dealloc(static_cast <pointer> (__p));
+        } cache.real = nullptr;
     }
 
-};
+ public:
 
+    /* Simple iterator implement. */
+    struct iterator {
+        baseptr __p; /* Pointer to node_base before the real data. */
+
+        /* Return pointer to real data in next node in hash_map. */
+        key_t *next_data() const noexcept
+        { return __p->real ? &static_cast <pointer> (__p->real)->data : nullptr; }
+
+        iterator &operator ++(void) noexcept { 
+            __p = static_cast <pointer> (static_cast <pointer> (__p)->next);
+            return *this;
+        }
+
+        key_t &operator * (void) const noexcept
+        { return  static_cast <pointer> (__p)->data; }
+
+        key_t *operator ->(void) const noexcept
+        { return &static_cast <pointer> (__p)->data; }
+
+        void *base() const noexcept { return __p; }
+    };
+
+    iterator begin() { return { static_cast <pointer> (header.next) }; }
+    iterator end()   { return { static_cast <pointer> (&header) }; }
+
+    friend bool operator != (const iterator &lhs,const iterator &rhs)
+    noexcept { return lhs.base() != rhs.base(); }
+};
 
 }
 
