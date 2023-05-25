@@ -18,7 +18,7 @@ struct value_pair {
 
 /* Tuple of value and index and count. */
 template <class key_t,class T>
-struct tuple {
+struct value_tuple {
     using value_t = value_pair <key_t,T>;
     header head;  /* A small header. */
     value_t v; /* Smallest pair of target node. */
@@ -61,8 +61,8 @@ template <
 >
 class tree {
   private: /* Struct and using part. */
-
-    using tuple_t = tuple <key_t,T>;
+    using pair_t  = value_pair  <key_t,T>; 
+    using tuple_t = value_tuple <key_t,T>;
 
     /* Maximum node number. */
     static constexpr int MAXN_SIZE = 1919810;
@@ -85,7 +85,7 @@ class tree {
     };
 
     using node_file_t =
-            file_manager <
+            cached_file_manager <
                 node,
                 TABLE_SIZE,
                 CACHE_SIZE,
@@ -105,8 +105,6 @@ class tree {
 
     std::pair <file_state,node> __root_pair; /* Do not use it directly. */
     visitor cache_pointer;
-    bool return_value; /* Return value stored for insert and erase. */
-
     node_file_t file;
 
    private:
@@ -186,7 +184,7 @@ class tree {
     inline visitor allocate() { return file.allocate(); }
 
     /* Insert into an empty tree. */
-    bool insert_root(const key_t &key,const T &val) {
+    void insert_root(const key_t &key,const T &val) {
         /* Allocate one node at outer file. */
         visitor pointer = allocate();
 
@@ -200,11 +198,10 @@ class tree {
         pointer->set_next(MAXN_SIZE,node_type::OUTER);
         pointer->count = 1;
         pointer->data[0].copy(key,val);
-        return true;
     }
 
     /* Split the root node */
-    bool split_root() {
+    void split_root() {
         visitor prev = allocate();
         visitor next = allocate();
 
@@ -225,7 +222,6 @@ class tree {
         root().head(1) = {next.index(),next->count};
 
         root().data[1].v = next->data[0].v;
-        return true;
     }
 
 
@@ -454,7 +450,6 @@ class tree {
 
         /* Data will be modified. */
         pointer.modify();
-        return_value = true;
 
         /* Insert the key-value pair into the node. */
         mmove(pointer->data + x + 1,pointer->data + x,head.count - x);
@@ -531,7 +526,6 @@ class tree {
 
         /* Data will be modified. */
         pointer.modify();
-        return_value = true;
 
         /* Insert the key-value pair into the node. */
         mmove(pointer->data + x,pointer->data + x + 1,head.count - x - 1);
@@ -632,16 +626,12 @@ class tree {
      * @param val Value to be inserted.
      * @return Whether the insertion is successful.
      */
-    bool insert(const key_t &key,const T &val) {
+    void insert(const key_t &key,const T &val) {
         /* Empty Tree special case. */
         if(empty()) return insert_root(key,val);
 
-        return_value = false;
         /* When the node under root is too full. */
-        if(insert(root(),key,val) && root().count > BLOCK_SIZE) 
-            return split_root();
-        /* Nothing should be done to root node case. */
-        else return return_value;
+        if(insert(root(),key,val) && root().count > BLOCK_SIZE) split_root();
     }
 
 
@@ -652,10 +642,8 @@ class tree {
      * @param val Value to be inserted.
      * @return Whether the erasion is successful.
      */    
-    bool erase(const key_t &key,const T &val) {
-        return_value = false;
+    void erase(const key_t &key,const T &val) {
         if(!empty()) erase(root(),key,val);
-        return return_value;
     }
 
 
@@ -675,48 +663,111 @@ class tree {
         /* Find in the first block. */
         while(x != head.count) {
             if(k_comp(key,pointer->data[x].v.key)) return;
-            v.push_back(pointer->data[x++].v.val);
+            v.copy_back(pointer->data[x++].v.val);
         }
         /* Find in the second block. */
         while(pointer->next() != MAXN_SIZE) {
             pointer = get_pointer(*pointer); x = 0;
-            while(x != pointer->count){
+            while(x != pointer->count) {
                 if(k_comp(key,pointer->data[x].v.key)) return;
-                v.push_back(pointer->data[x++].v.val);
+                v.copy_back(pointer->data[x++].v.val);
             }
         }
     }
 
 
-    /* Find reference to data , only when there exists only one value tied to key. */
-    T *get_reference(const key_t &key) {
-        if(empty()) return nullptr;
+    /* Find all value-type binded to key if satisfying compare function. */
+    template <class __C>
+    void find_if(const key_t &key,return_list &v,__C &&func) {
+        if(empty()) return;
         header head = root();
         /* Find the real inner node. */
         while(head.is_inner()) {
             visitor pointer = get_pointer(head);
-            int x = upper_bound(pointer->data,key,0,head.count);
-            if(x == 0) return nullptr; /* Not found case. */
-            head = pointer->head(x - 1);
+            int x = lower_bound(pointer->data + 1,key,0,head.count - 1);
+            head = pointer->head(x);
         }
         /* The real outer node. */
         visitor pointer = get_pointer(head);
         int x = lower_bound(pointer->data,key,0,head.count);
-        if(k_comp(key,pointer->data[x].v.key)) return nullptr;
-        else return &pointer->data[x].v.val;
+
+        /* Find in the first block. */
+        while(x != head.count) {
+            if(k_comp(key,pointer->data[x].v.key)) return;
+            const T &val = pointer->data[x++].v.val;
+            if(func(val)) v.copy_back(val);
+        }
+
+        /* Find in the second block. */
+        while(pointer->next() != MAXN_SIZE) {
+            pointer = get_pointer(*pointer); x = 0;
+            while(x != pointer->count) {
+                if(k_comp(key,pointer->data[x].v.key)) return;
+                const T &val = pointer->data[x++].v.val;
+                if(func(val)) v.copy_back(val);
+            }
+        }
     }
 
+    struct iterator;
+    friend class iterator;
+    /* Custom iterator. Be careful when modifing. */
+    struct iterator {
+        tree *__t;
+        visitor pointer;
+        int index;
 
-    /**
-     * @brief Clear all the data in the map.
-     * 
-     */
-    void clear() {
-        if(empty()) return;
-        root_state().modify();
-        root().count = 0; /* No node. */
-        file.clear();
+        iterator &operator ++(void) { 
+            if(++index == pointer->count) {
+                if(pointer->next() == tree::MAXN_SIZE)    index = -1;
+                else pointer = __t->get_pointer(*pointer),index =  0;
+            } return *this;
+        }
+
+        pair_t &operator * (void) const { return  pointer->data[index].v; }
+        pair_t *operator ->(void) const { return &pointer->data[index].v; }
+
+        bool valid() const noexcept { return index != -1; }
+    };
+
+    /* End iterator. */
+    iterator end() { return {nullptr,{nullptr},-1}; }
+
+    /* Find all value-type binded to key. */
+    iterator find(const key_t &key) {
+        if(empty()) return end();
+        header head = root();
+        /* Find the real inner node. */
+        while(head.is_inner()) {
+            visitor pointer = get_pointer(head);
+            int x = lower_bound(pointer->data + 1,key,0,head.count - 1);
+            head = pointer->head(x);
+        }
+        /* The real outer node. */
+        visitor pointer = get_pointer(head);
+        int x = lower_bound(pointer->data,key,0,head.count);
+        iterator temp = {this,pointer,x};
+        if(x == head.count) { --temp.index; ++temp; }
+        return temp;
     }
+
+    // /* Find reference to data , only when there exists only one value tied to key. */
+    // T *get_reference(const key_t &key) {
+    //     if(empty()) return nullptr;
+    //     header head = root();
+    //     /* Find the real inner node. */
+    //     while(head.is_inner()) {
+    //         visitor pointer = get_pointer(head);
+    //         int x = upper_bound(pointer->data,key,0,head.count);
+    //         if(x == 0) return nullptr; /* Not found case. */
+    //         head = pointer->head(x - 1);
+    //     }
+    //     /* The real outer node. */
+    //     visitor pointer = get_pointer(head);
+    //     int x = lower_bound(pointer->data,key,0,head.count);
+    //     if(k_comp(key,pointer->data[x].v.key)) return nullptr;
+    //     else return &pointer->data[x].v.val;
+    // }
 
 };
 
@@ -738,7 +789,7 @@ using bpt = b_plus::tree <
       T,
     TABLE_SIZE,
     CACHE_SIZE,
-    (page_num * 4096 - sizeof(header)) / sizeof(b_plus::tuple <key_t,T>)
+    (page_num * 4096 - sizeof(header)) / sizeof(b_plus::value_tuple <key_t,T>)
 >;
 
 

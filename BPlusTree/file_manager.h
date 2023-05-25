@@ -8,7 +8,7 @@ namespace dark {
 
 
 /**
- * @brief A file manager requiring two files.
+ * @brief A LRU-cached file manager using two files.
  * 
  * @tparam T The inner data type.
  * @tparam table_size Table size of inner LRU_map.
@@ -21,7 +21,7 @@ template <
     size_t cache_size,
     size_t page_size = ((sizeof(T) - 1) / 4096 + 1) * 4096
 >
-class file_manager {
+class cached_file_manager {
   public:
     struct visitor; /* Declaration. */
 
@@ -79,7 +79,7 @@ class file_manager {
     };
 
     /* Can't start from nothing. */
-    file_manager() = delete;
+    cached_file_manager() = delete;
 
     /**
      * @brief Construct a new file manager object.
@@ -87,7 +87,7 @@ class file_manager {
      * @param __dat The path for .dat file.
      * @param __bin The path for .bin file.
      */
-    file_manager(std::string __dat,std::string __bin) noexcept :
+    cached_file_manager(std::string __dat,std::string __bin) noexcept :
         bin(__bin), dat_file(__dat,std::ios::in | std::ios::out | std::ios::binary)  {
         if(!dat_file.good()) {
             dat_file.close(); dat_file.open(__dat,std::ios::out);
@@ -96,7 +96,7 @@ class file_manager {
     }
 
     /* Write out information. */
-    ~file_manager() {
+    ~cached_file_manager() {
         /* Write cache info from data to disk*/
         for(auto &&iter : map) {
             if(iter.first.is_modified())
@@ -113,16 +113,10 @@ class file_manager {
     }
 
     /* Recycle an old node. */
-    void recycle(int index) {
-        bin.recycle(index);           /* Recycle first to rubbish bin. */
-        map.erase({index,0});         /* Erase element from map. */
-    }
+    void recycle(int index) { bin.recycle(index); map.erase({index,0}); }
 
     /* Allocate a new node for further modification. */
-    visitor allocate() {
-        /* Of course, newly allocated node will be modified. */
-        return insert_map({bin.allocate(),1});
-    }
+    visitor allocate() { return insert_map({bin.allocate(),1}); }
 
     /* Skip the last block. Users should manage the block themselves. */
     void init() { bin.skip_block(); }
@@ -132,23 +126,130 @@ class file_manager {
         dat_file.seekg(index * page_size);
         dat_file.read((char *)&obj,page_size);
     }
+
     /* Write object to disk at given index. */
     void write_object(const T &obj,int index) {
         dat_file.seekp(index * page_size);
         dat_file.write((const char *)&obj,page_size);
     }
 
-    /* Clear the data within. */
-    void clear() {
-        bin.reset();
-        map.clear();
-    }
-
     /* Count of all nodes. */
     size_t size() const noexcept { return bin.size(); }
+
     /* Whether node count is zero. */
     bool empty() const noexcept { return !bin.size(); }
 };
+
+
+/**
+ * @brief Uncached file manager for indirect IO.
+ * 
+ * @tparam T    Template class.
+ * @tparam 4096 Size of one page.
+ */
+template <
+    class T,
+    size_t page_size = ((sizeof(T) - 1) / 4096 + 1) * 4096
+>
+class file_manager : public rubbish_bin {
+  private:
+
+    std::fstream dat_file; /* Pure data file. */
+
+  public:
+
+    /* Can't start from nothing. */
+    file_manager() = delete;
+
+    /**
+     * @brief Construct a new file manager object.
+     * 
+     * @param __dat The path for .dat file.
+     * @param __bin The path for .bin file.
+     */
+    file_manager(std::string __dat,std::string __bin) noexcept :
+        rubbish_bin(__bin), dat_file(__dat,std::ios::in | std::ios::out | std::ios::binary)  {
+        if(!dat_file.good()) {
+            dat_file.close(); dat_file.open(__dat,std::ios::out);
+            dat_file.close(); dat_file.open(__dat,std::ios::in | std::ios::out | std::ios::binary);
+        }
+    }
+
+    /* Write out information. */
+    ~file_manager() = default;
+
+    /* Read object from disk at given index. */
+    void read_object(T &obj,int index) {
+        dat_file.seekg(index * page_size);
+        dat_file.read((char *)&obj,page_size);
+    }
+
+    void read_object(T &obj,int index,int offset,int length) {
+        dat_file.seekg(index * page_size + offset);
+        dat_file.read(((char *)&obj) + offset,length);
+    }
+
+    /* Write object to disk at given index. */
+    void write_object(const T &obj,int index) {
+        dat_file.seekp(index * page_size);
+        dat_file.write((const char *)&obj,page_size);
+    }
+
+    /* Read object from disk at given index. */
+    void write_object(const T &obj,int index,int offset,int length) {
+        dat_file.seekp(index * page_size + offset);
+        dat_file.write(((const char *)&obj) + offset,length);
+    }
+
+    /* Whether node count is zero. */
+    bool empty() const noexcept { return !size(); }
+};
+
+
+template <
+    class T,
+    size_t kTABLESIZE
+>
+class external_hash_set : public linked_hash_set <T,kTABLESIZE> {
+  private:
+    std::fstream file;
+  public:
+
+    external_hash_set(std::string __path) {
+        __path += ".dat";
+        file.open(__path,std::ios::in | std::ios::out | std::ios::binary);
+        if(!file.good()) {
+            file.close(); file.open(__path,std::ios::out | std::ios::binary);
+        } else { /* Read from memory. */
+            /* First read count. */
+            file.seekg(0); size_t count;
+            file.read((char *)&count,sizeof(count));
+
+            /* Construct the array for read-in. */
+            dark::trivial_array <T> t; t.resize(count);
+            file.read((char *)t.data(),count * sizeof(T));
+
+            /* Fill the set with data. */
+            for(auto &&iter : t) this->insert(iter);
+        }
+    }
+
+    ~external_hash_set() {
+        this->shrink(); /* Release space first in case of MLE. */
+        dark::trivial_array <T> t;
+        t.reserve(this->size());
+        for(auto &&iter : *this) t.copy_back(iter);
+
+        /* First write count */
+        file.seekp(0);
+        size_t count = t.size();
+        file.write((const char *)&count,sizeof(count));
+
+        /* Next write main data.  */
+        file.write((const char *)t.data(),count * sizeof(T));
+    }
+};
+
 
 }
 

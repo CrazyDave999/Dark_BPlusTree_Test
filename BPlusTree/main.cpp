@@ -13,6 +13,7 @@ size_t hash_str(const char *str) {
 signed main() {
     using tree = dark::bpt <size_t,int,1023,10000,2>;
     typename tree::return_list data;
+    typename tree::iterator    iter;
     std::filesystem::create_directory("output");
     tree t("output/a");
     int n = dark::read <int> ();
@@ -27,11 +28,14 @@ signed main() {
             t.erase(hash_str(str.base()),dark::read <int> ());
         } else {
             dark::read(str.str);
-            t.find(hash_str(str.base()),data);
-            if(data.empty()) puts("null");
+            // t.find(hash_str(str.base()),data);
+            size_t __h = hash_str(str.base());
+            iter = t.find(__h);
+            if(!iter.valid() || iter->key != __h) puts("null");
             else {
-                for(auto iter : data) dark::print(iter,' ');
-                data.clear();
+                do {
+                    dark::print(iter->val,' '); ++iter;
+                } while(iter.valid() && iter->key == __h);
                 putchar('\n');
             }
         }
